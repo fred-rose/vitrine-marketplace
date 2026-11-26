@@ -67,13 +67,12 @@ class Command(BaseCommand):
         )
         contas = {}
         for username, nome in CONTAS_DEMO.items():
-            usuario, _ = usuarios.get_or_create(
-                username=username, defaults={"first_name": nome, "password": make_password(None)}
+            vendedor = username != "demo_comprador"
+            usuario, criado = usuarios.select_for_update().get_or_create(
+                username=username,
+                defaults={"first_name": nome, "password": make_password(None), "is_staff": vendedor},
             )
-            if username != "demo_comprador":
-                if not usuario.is_staff:
-                    usuario.is_staff = True
-                    usuario.save(update_fields=("is_staff",))
+            if criado and vendedor:
                 usuario.user_permissions.add(*permissoes)
             contas[username] = usuario
 
@@ -88,13 +87,10 @@ class Command(BaseCommand):
                     defaults={
                         "categoria": categoria, "descricao": descricao,
                         "preco": Decimal(preco), "estoque": estoque,
+                        "imagem_local": f"loja/img/produtos/{IMAGENS[nome_categoria][indice]}.jpg",
                     },
                 )
                 criados += criado
-                imagem = f"loja/img/produtos/{IMAGENS[nome_categoria][indice]}.jpg"
-                if produto.imagem_local != imagem:
-                    produto.imagem_local = imagem
-                    produto.save(update_fields=("imagem_local",))
                 catalogo[nome_categoria, indice] = produto
 
         vendas_criadas = 0

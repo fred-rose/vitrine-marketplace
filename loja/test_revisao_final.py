@@ -157,6 +157,29 @@ class RevisaoDemoTests(TestCase):
     def setUp(self):
         call_command("seed_demo", stdout=StringIO())
 
+    def test_reexecucao_preserva_dados_editados_e_permissoes_revogadas(self):
+        vendedor = get_user_model().objects.get(username="demo_vendedor_1")
+        vendedor.is_staff = False
+        vendedor.save(update_fields=("is_staff",))
+        vendedor.user_permissions.clear()
+        produto = Produto.objects.filter(vendedor=vendedor).first()
+        produto.imagem_local = "loja/img/hero.jpg"
+        produto.estoque = 1
+        produto.save(update_fields=("imagem_local", "estoque"))
+
+        saida = StringIO()
+        call_command("seed_demo", stdout=saida)
+
+        vendedor.refresh_from_db()
+        produto.refresh_from_db()
+        self.assertEqual(Produto.objects.count(), 16)
+        self.assertFalse(vendedor.is_staff)
+        self.assertFalse(vendedor.user_permissions.exists())
+        self.assertEqual(produto.imagem_local, "loja/img/hero.jpg")
+        self.assertEqual(produto.estoque, 1)
+        self.assertIn("Produtos novos: 0", saida.getvalue())
+        self.assertIn("Vendas fictícias novas: 0", saida.getvalue())
+
     def test_seed_associa_16_arquivos_locais_e_vendas_ficticias_sem_pagamentos(self):
         produtos = Produto.objects.all()
         self.assertEqual(produtos.values("imagem_local").distinct().count(), 16)

@@ -2,6 +2,8 @@
 
 Projeto 5 da disciplina Construção de Backend no IESB. A Vitrine reúne catálogo, estoque, pedidos, pagamentos de teste e acompanhamento de vendas em uma aplicação web responsiva.
 
+[Acesse o Marketplace Vitrine no Render](https://vitrine-marketplace.onrender.com)
+
 ## Problema e proposta de valor
 
 Pequenos comerciantes que começam a vender pela internet muitas vezes administram produtos, pedidos e estoque em canais separados. Isso torna mais difícil manter a disponibilidade atualizada e acompanhar o que foi vendido. A Vitrine facilita a entrada no comércio digital ao centralizar produtos, estoques, pedidos, pagamentos e acompanhamento de vendas.
@@ -272,12 +274,19 @@ Quando estiver pronto para publicar, conecte o repositório no Render e revise o
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | Origens HTTPS adicionais, separadas por vírgula, como `https://loja.example.com`. A origem do serviço Render é incluída automaticamente. |
 | `DJANGO_TRUST_PROXY_HTTPS` | `1` fora do Render somente se o proxy confiável substituir `X-Forwarded-Proto`. O Render recebe esta configuração automaticamente. |
 | `DATABASE_URL` | URL `postgresql://` ou `postgres://`. Obrigatória em produção e ligada ao banco do Blueprint. Se estiver vazia em desenvolvimento, o Django usa SQLite. Para conexões externas ao Render, use a URL externa, restrinja o IP de origem e configure TLS. |
+| `SEED_DEMO` | Defina `1` para popular o banco com dados de demonstração no build, após as migrações. Ausente ou com outro valor, o build segue sem executar o seed. |
 | `STRIPE_SECRET_KEY` | Chave `sk_test_…` do sandbox, se for habilitar pagamentos. |
 | `STRIPE_WEBHOOK_SECRET` | Segredo de assinatura do endpoint Stripe. O segredo da CLI é próprio do encaminhamento local. |
 | `STRIPE_PUBLIC_ORIGIN` | Origem pública HTTPS usada para os retornos do Stripe, se for habilitar pagamentos. |
 | `PYTHON_VERSION` e `PORT` | O Blueprint fixa Python 3.14.10. O Render fornece `PORT` ao Gunicorn. |
 
-Configure os segredos no painel do Render ou no ambiente do processo local. O [`.env.example`](.env.example) serve como referência. O deploy parte de um banco PostgreSQL vazio. Se precisar preservar dados do SQLite, planeje a migração dos dados separadamente. Crie o superusuário e rode `seed_demo` apenas se quiser a demonstração. Use um terminal autorizado com acesso ao banco, pois o plano web gratuito não oferece shell no Render.
+Configure os segredos no painel do Render ou no ambiente do processo local. O [`.env.example`](.env.example) serve como referência. Se precisar preservar dados do SQLite, planeje a migração dos dados separadamente. Para criar um superusuário, use um terminal autorizado com acesso ao banco, pois o plano web gratuito não oferece shell no Render.
+
+### Popular o PostgreSQL com dados de demonstração
+
+1. No painel do serviço `vitrine-marketplace`, abra **Environment** e adicione `SEED_DEMO=1`.
+2. Escolha **Save, rebuild, and deploy** e confirme que o deploy usa a versão que inclui a opção no `render-build.sh`. O seed roda depois das migrações. [Variáveis de ambiente do Render](https://render.com/docs/configure-environment-variables)
+3. Confira nos logs do build os totais criados e abra o catálogo público. Num banco vazio, o seed cria 16 produtos, quatro categorias, três contas com senha desativada e quatro pedidos fictícios. As reexecuções reaproveitam produtos por vendedor e nome e preservam dados já cadastrados. Remova a variável ou ajuste para `0` quando quiser pular o seed em builds futuros.
 
 Após o deploy, confirme que o catálogo, o login e os arquivos estáticos funcionam por HTTPS, confira os logs de build e execute `python manage.py check --deploy` com as variáveis de produção. O HSTS cobre o domínio servido. A inclusão de subdomínios e o preload ficam desativados até haver uma política de domínio que permita ativá-los. O backend de e-mail de console é exclusivo do desenvolvimento. Caso passe a enviar e-mail em produção, configure um provedor compatível com o ambiente de execução.
 
