@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
@@ -156,6 +157,43 @@ class RevisaoPedidoTests(TestCase):
 class RevisaoDemoTests(TestCase):
     def setUp(self):
         call_command("seed_demo", stdout=StringIO())
+
+    def test_env_configura_apenas_senhas_desativadas_e_ignora_variavel_vazia(self):
+        usuarios = get_user_model().objects
+        vendedor = usuarios.get(username="demo_vendedor_1")
+        vendedor.is_staff = False
+        vendedor.save(update_fields=("is_staff",))
+        vendedor.user_permissions.clear()
+        senha = get_random_secret_key()
+        outra = get_random_secret_key()
+        saida = StringIO()
+        env = {"DEMO_BUYER_PASSWORD": senha, "DEMO_SELLER_1_PASSWORD": outra, "DEMO_SELLER_2_PASSWORD": ""}
+        with patch.dict(os.environ, env):
+            call_command("configurar_senha_demo", "--from-env", stdout=saida)
+
+        comprador = usuarios.get(username="demo_comprador")
+        self.assertTrue(comprador.check_password(senha))
+        vendedor.refresh_from_db()
+        self.assertTrue(vendedor.check_password(outra))
+        self.assertFalse(vendedor.is_staff)
+        self.assertFalse(vendedor.user_permissions.exists())
+        self.assertFalse(usuarios.get(username="demo_vendedor_2").has_usable_password())
+
+        with patch.dict(os.environ, {**env, "DEMO_BUYER_PASSWORD": outra}):
+            call_command("configurar_senha_demo", "--from-env", stdout=saida)
+        comprador.refresh_from_db()
+        self.assertTrue(comprador.check_password(senha))
+        self.assertNotIn(senha, saida.getvalue())
+        self.assertNotIn(outra, saida.getvalue())
+
+    def test_env_reverte_configuracao_se_uma_senha_for_invalida(self):
+        senha = get_random_secret_key()
+        env = {"DEMO_BUYER_PASSWORD": senha, "DEMO_SELLER_1_PASSWORD": "12", "DEMO_SELLER_2_PASSWORD": ""}
+        saida = StringIO()
+        with patch.dict(os.environ, env), self.assertRaisesMessage(CommandError, "DEMO_SELLER_1_PASSWORD"):
+            call_command("configurar_senha_demo", "--from-env", stdout=saida)
+        self.assertFalse(get_user_model().objects.get(username="demo_comprador").has_usable_password())
+        self.assertEqual(saida.getvalue(), "")
 
     def test_reexecucao_preserva_dados_editados_e_permissoes_revogadas(self):
         vendedor = get_user_model().objects.get(username="demo_vendedor_1")

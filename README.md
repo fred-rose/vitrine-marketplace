@@ -243,6 +243,20 @@ python manage.py configurar_senha_demo demo_vendedor_2
 
 A senha é digitada sem eco, pede confirmação e passa pelos validadores do Django. Entre por `/api-auth/login/`. Como comprador, use `/pedidos/` para experimentar a avaliação. Como vendedor, acesse `/vendedor/` para ver seus relatórios.
 
+### Primeiro login das contas demo no Render
+
+Em **Environment**, no painel do serviço, defina uma senha forte e distinta para cada conta que desejar habilitar. Selecione **Save, rebuild, and deploy**.
+
+| Variável opcional | Conta |
+| --- | --- |
+| `DEMO_BUYER_PASSWORD` | `demo_comprador` |
+| `DEMO_SELLER_1_PASSWORD` | `demo_vendedor_1` |
+| `DEMO_SELLER_2_PASSWORD` | `demo_vendedor_2` |
+
+O build executa `python manage.py configurar_senha_demo --from-env` após as migrações e o seed opcional. Se as contas já existirem, `SEED_DEMO=1` pode ficar desativado. O comando ignora variáveis vazias e contas com senha utilizável. Ele mantém as permissões e o estado de ativação existentes. Se uma conta configurada estiver ausente ou os validadores do Django rejeitarem uma senha nova, o build informa o nome da conta ou da variável e reverte as alterações de senha dessa execução.
+
+Após confirmar o login, remova as variáveis de senha do Render. As senhas permanecem armazenadas como hashes no PostgreSQL. Use o comando interativo para alterar intencionalmente uma senha existente.
+
 ### Stripe em sandbox
 
 A homologação de ponta a ponta foi concluída em 26/11/2026 no Stripe Sandbox. O pedido **#6**, de **R$ 49,90**, foi confirmado em `PAGO`. A sessão no Stripe estava `complete` e `paid`, e o evento `checkout.session.completed` conferia com o webhook processado pelo Django. O produto permaneceu com **6 unidades em estoque** após o pagamento, sem segunda baixa. As suítes automatizadas continuam usando mocks e assinaturas locais.
