@@ -1,0 +1,25 @@
+{% extends "loja/base.html" %}
+
+{% block titulo %}Avaliar produto | Vitrine{% endblock %}
+
+{% block conteudo %}
+    <div class="page-heading">
+        <a class="text-link back-link" href="{% url 'loja:historico_pedidos' %}">Voltar aos pedidos</a>
+        <h1>Avaliar produto</h1>
+    </div>
+    <section class="seller-panel review-panel" aria-labelledby="produto-avaliado">
+        <h2 id="produto-avaliado">{{ produto.nome }}</h2>
+        <form method="post" class="login-form">
+            {% csrf_token %}
+            {{ form.non_field_errors }}
+            {% for campo in form %}
+                <div class="login-field">
+                    {{ campo.label_tag }}
+                    {{ campo }}
+                    {{ campo.errors }}
+                </div>
+            {% endfor %}
+            <button type="submit" class="button button--primary">Publicar avaliação</button>
+        </form>
+    </section>
+{% endblock %}

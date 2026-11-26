@@ -1,0 +1,97 @@
+{% extends "loja/base.html" %}
+{% load l10n %}
+
+{% block titulo %}Catálogo | Vitrine{% endblock %}
+
+{% block conteudo %}
+    <section class="hero" aria-labelledby="hero-titulo">
+        <div class="hero-copy">
+            <h1 id="hero-titulo">Boas escolhas<br>para o dia a dia<span>.</span></h1>
+            <p>Explore o catálogo e encontre o que precisa em um só lugar.</p>
+            <a class="button button--light" href="#produtos">Explorar catálogo <svg class="icon" aria-hidden="true"><use href="#icon-seta"></use></svg></a>
+        </div>
+        <div class="hero-art" aria-hidden="true"></div>
+    </section>
+
+    <section class="catalogo" id="produtos" aria-labelledby="produtos-titulo"
+             data-catalogo data-api="{% url 'loja:api_produtos' %}" data-adicionar="{% url 'loja:carrinho_adicionar' 0 %}">
+        <div class="section-heading">
+            <div><h2 id="produtos-titulo">Produtos</h2><p data-resultado role="status"></p></div>
+            <a class="text-link" href="{% url 'loja:carrinho' %}">Ver carrinho <svg class="icon" aria-hidden="true"><use href="#icon-seta"></use></svg></a>
+        </div>
+        <div class="catalog-filters" role="group" aria-label="Filtros do catálogo">
+            <div class="catalog-filter">
+                <label for="filtro-categoria">Categoria</label>
+                <select id="filtro-categoria" name="categoria" form="pesquisa-catalogo">
+                    <option value="">Todas as categorias</option>
+                    {% for id, nome in categorias.items %}
+                        <option value="{{ id|unlocalize }}"{% if filtros.categoria.value == id|stringformat:'s' %} selected{% endif %}>{{ nome }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="catalog-filter">
+                <label for="filtro-preco-min">Preço mínimo (R$)</label>
+                <input id="filtro-preco-min" name="preco_min" type="number" min="0" max="9999999999.99" step="0.01" form="pesquisa-catalogo" value="{{ filtros.preco_min.value|default_if_none:'' }}">
+            </div>
+            <div class="catalog-filter">
+                <label for="filtro-preco-max">Preço máximo (R$)</label>
+                <input id="filtro-preco-max" name="preco_max" type="number" min="0" max="9999999999.99" step="0.01" form="pesquisa-catalogo" value="{{ filtros.preco_max.value|default_if_none:'' }}">
+            </div>
+            <button class="button button--secondary" type="submit" form="pesquisa-catalogo">Aplicar filtros</button>
+        </div>
+        {% if filtros.errors %}<div class="filter-errors" data-erros-filtros role="alert">{{ filtros.errors }}</div>{% endif %}
+        <div class="client-notice" data-feedback role="status" hidden></div>
+        <div class="state-panel" data-estado hidden>
+            <span class="state-icon"><svg class="icon" aria-hidden="true"><use href="#icon-caixa"></use></svg></span>
+            <h3 data-estado-titulo></h3>
+            <p data-estado-detalhe></p>
+            <button type="button" class="button button--secondary" data-recarregar hidden>Tentar novamente</button>
+        </div>
+        <div class="product-grid" data-produtos aria-busy="true"></div>
+        {{ categorias|json_script:"categorias-catalogo" }}
+        <template id="modelo-produto">
+            <article class="product-card">
+                <div class="product-art" aria-hidden="true">
+                    <svg class="icon"><use href="#icon-caixa"></use></svg>
+                    <img alt="" loading="lazy" hidden>
+                </div>
+                <div class="product-body">
+                    <p class="product-category"></p>
+                    <h3></h3>
+                    <p class="product-description"></p>
+                    <p class="product-rating"></p>
+                    <div class="product-meta"><strong class="product-price"></strong><span class="product-stock"></span></div>
+                    <form method="post" data-adicionar-form>
+                        {% csrf_token %}
+                        <button type="submit" class="button button--primary"><svg class="icon" aria-hidden="true"><use href="#icon-sacola"></use></svg><span>Adicionar ao carrinho</span></button>
+                    </form>
+                </div>
+            </article>
+        </template>
+        <noscript>
+            <div class="product-grid">
+                {% for produto in produtos %}
+                    <article class="product-card">
+                        <div class="product-art" aria-hidden="true">
+                            <svg class="icon"><use href="#icon-caixa"></use></svg>
+                            {% if produto.imagem_exibicao %}<img src="{{ produto.imagem_exibicao }}" alt="" loading="lazy">{% endif %}
+                        </div>
+                        <div class="product-body">
+                            <p class="product-category">{{ produto.categoria.nome }}</p>
+                            <h3>{{ produto.nome }}</h3>
+                            <p class="product-description">{{ produto.descricao }}</p>
+                            <p class="product-rating">{% if produto.media_avaliacoes is not None %}Avaliação {{ produto.media_avaliacoes|floatformat:1 }} / 5{% else %}Sem avaliações{% endif %}</p>
+                            <div class="product-meta"><strong class="product-price">R$ {{ produto.preco }}</strong><span class="product-stock{% if not produto.estoque %} is-unavailable{% endif %}">{% if produto.estoque %}Em estoque{% else %}Esgotado{% endif %}</span></div>
+                            <form method="post" action="{% url 'loja:carrinho_adicionar' produto.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="button button--primary"{% if not produto.estoque %} disabled{% endif %}>Adicionar ao carrinho</button>
+                            </form>
+                        </div>
+                    </article>
+                {% empty %}
+                    <div class="state-panel"><h3>{% if pesquisa or filtros.categoria.value or filtros.preco_min.value or filtros.preco_max.value %}Nenhum produto encontrado{% else %}Nenhum produto cadastrado{% endif %}</h3></div>
+                {% endfor %}
+            </div>
+        </noscript>
+    </section>
+{% endblock %}

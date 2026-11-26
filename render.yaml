@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: vitrine-marketplace
+    runtime: python
+    plan: free
+    autoDeployTrigger: "off"
+    buildCommand: bash ./render-build.sh
+    startCommand: gunicorn marketplace.wsgi:application --bind 0.0.0.0:$PORT --workers 2
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.14.10"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vitrine-postgres
+          property: connectionString
+
+databases:
+  - name: vitrine-postgres
+    databaseName: vitrine
+    plan: free
+    ipAllowList: []

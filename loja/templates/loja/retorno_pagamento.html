@@ -1,0 +1,25 @@
+{% extends "loja/base.html" %}
+{% load l10n %}
+
+{% block titulo %}Pagamento | Vitrine{% endblock %}
+
+{% block conteudo %}
+    <section class="state-panel" aria-labelledby="pagamento-titulo">
+        <span class="state-icon"><svg class="icon" aria-hidden="true"><use href="#icon-cadeado"></use></svg></span>
+        {% if confirmado %}
+            <h1 id="pagamento-titulo">Pagamento aprovado</h1>
+            <p>O pagamento de teste do pedido #{{ pedido.pk|unlocalize }} foi confirmado.</p>
+        {% elif pedido.status == 'CANCELADO' %}
+            <h1 id="pagamento-titulo">Pedido cancelado</h1>
+            <p>O pedido #{{ pedido.pk|unlocalize }} está fechado para pagamento.</p>
+        {% elif cancelado %}
+            <h1 id="pagamento-titulo">Você saiu do pagamento</h1>
+            <p>Acompanhe a situação do pedido #{{ pedido.pk|unlocalize }} em Meus pedidos.</p>
+            {% if pedido.status == 'ABERTO' and pedido.criado_em > limite_reserva %}{% include "loja/botao_pagar.html" %}{% endif %}
+        {% else %}
+            <h1 id="pagamento-titulo">Aguardando confirmação</h1>
+            <p>Assim que o Stripe confirmar o pagamento, o pedido #{{ pedido.pk|unlocalize }} será atualizado.</p>
+        {% endif %}
+        <a class="text-link" href="{% url 'loja:historico_pedidos' %}">Ver meus pedidos</a>
+    </section>
+{% endblock %}

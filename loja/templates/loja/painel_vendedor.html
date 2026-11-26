@@ -1,0 +1,128 @@
+{% extends "loja/base.html" %}
+{% load l10n %}
+
+{% block titulo %}Painel do vendedor | Vitrine{% endblock %}
+
+{% block conteudo %}
+    <section class="seller-dashboard" aria-labelledby="painel-titulo">
+        <div class="seller-heading">
+            <h1 id="painel-titulo">Painel do vendedor<span class="brand-dot">.</span></h1>
+            <a class="button button--secondary" href="{% url 'admin:loja_produto_changelist' %}">
+                Gerenciar produtos <svg class="icon" aria-hidden="true"><use href="#icon-seta"></use></svg>
+            </a>
+        </div>
+
+        <section class="seller-panel" aria-labelledby="estoque-titulo">
+            <h2 id="estoque-titulo">Estoque atual</h2>
+            <dl class="seller-metrics">
+                <div><dt>Produtos cadastrados</dt><dd>{{ estoque.cadastrados }}</dd></div>
+                <div><dt>Unidades em estoque</dt><dd>{{ estoque.disponivel }}</dd></div>
+                <div><dt>Produtos esgotados</dt><dd>{{ estoque.esgotados }}</dd></div>
+            </dl>
+        </section>
+
+        <section class="seller-panel" aria-labelledby="vendas-titulo">
+            <h2 id="vendas-titulo">Vendas no período</h2>
+            <form class="seller-period" method="get" action="{% url 'loja:painel_vendedor' %}">
+                {% for campo in periodo %}
+                    <div class="login-field">
+                        {{ campo.label_tag }}
+                        {{ campo }}
+                        {{ campo.errors }}
+                    </div>
+                {% endfor %}
+                <button class="button button--primary" type="submit">Filtrar</button>
+                {% if periodo.inicio.value or periodo.fim.value %}
+                    <a class="button button--secondary" href="{% url 'loja:painel_vendedor' %}">Limpar filtro</a>
+                {% endif %}
+            </form>
+            {% if resumo %}
+                <dl class="seller-metrics">
+                    <div><dt>Faturamento</dt><dd>R$ {{ resumo.faturamento|floatformat:"2g" }}</dd></div>
+                    <div><dt>Unidades vendidas</dt><dd>{{ resumo.unidades }}</dd></div>
+                    <div><dt>Pedidos recebidos</dt><dd>{{ resumo.pedidos }}</dd></div>
+                </dl>
+                <p class="seller-note">Os pedidos recebidos incluem todos os status. As vendas incluem pedidos pagos, enviados e concluídos.</p>
+                {% if vendas_demo %}<p class="seller-note">Os totais incluem vendas fictícias de demonstração.</p>{% endif %}
+            {% endif %}
+        </section>
+
+        {% if resumo %}
+            <div class="seller-reports">
+                <section class="seller-panel" aria-labelledby="ranking-titulo">
+                    <h2 id="ranking-titulo">Produtos mais vendidos</h2>
+                    {% if ranking %}
+                        <ol class="seller-chart">
+                            {% for linha in ranking %}
+                                <li>
+                                    <span>{{ linha.produto__nome }}</span><strong>{{ linha.unidades }} un.</strong>
+                                    <meter min="0" max="{{ max_unidades|unlocalize }}" value="{{ linha.unidades|unlocalize }}" aria-hidden="true"></meter>
+                                </li>
+                            {% endfor %}
+                        </ol>
+                    {% else %}
+                        <p class="seller-note">Nenhuma venda no período.</p>
+                    {% endif %}
+                </section>
+
+                <section class="seller-panel" aria-labelledby="categorias-titulo">
+                    <h2 id="categorias-titulo">Vendas por categoria</h2>
+                    <ul class="seller-chart">
+                        {% for linha in por_categoria %}
+                            <li>
+                                <span>{{ linha.produto__categoria__nome }} <small>· {{ linha.unidades }} un.</small></span>
+                                <strong>R$ {{ linha.faturamento|floatformat:"2g" }}</strong>
+                                <meter min="0" max="{{ max_faturamento|default:1|unlocalize }}" value="{{ linha.faturamento|unlocalize }}" aria-hidden="true"></meter>
+                            </li>
+                        {% empty %}
+                            <li class="seller-note">Nenhuma venda no período.</li>
+                        {% endfor %}
+                    </ul>
+                </section>
+            </div>
+
+            <section class="seller-panel" aria-labelledby="produtos-vendidos-titulo">
+                <h2 id="produtos-vendidos-titulo">Vendas por produto</h2>
+                {% if por_produto %}
+                    <div class="seller-table-wrap" role="region" aria-labelledby="produtos-vendidos-titulo" tabindex="0">
+                        <table class="seller-table">
+                            <thead><tr><th scope="col">Produto</th><th scope="col">Categoria</th><th scope="col">Unidades</th><th scope="col">Faturamento</th></tr></thead>
+                            <tbody>
+                                {% for linha in por_produto %}
+                                    <tr><th scope="row">{{ linha.produto__nome }}</th><td>{{ linha.produto__categoria__nome }}</td><td>{{ linha.unidades }}</td><td>R$ {{ linha.faturamento|floatformat:"2g" }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="seller-note">Nenhuma venda no período.</p>
+                {% endif %}
+            </section>
+
+            <section class="seller-panel" aria-labelledby="historico-titulo">
+                <h2 id="historico-titulo">Histórico de vendas</h2>
+                {% if historico.object_list %}
+                    <div class="seller-table-wrap" role="region" aria-labelledby="historico-titulo" tabindex="0">
+                        <table class="seller-table">
+                            <thead><tr><th scope="col">Pedido</th><th scope="col">Data do pedido</th><th scope="col">Status</th><th scope="col">Produto</th><th scope="col">Unidades</th><th scope="col">Subtotal</th></tr></thead>
+                            <tbody>
+                                {% for item in historico %}
+                                    <tr><td>#{{ item.pedido_id|unlocalize }}{% if item.pedido.referencia_demo %} · Demo{% endif %}</td><td>{{ item.pedido.criado_em|date:"d/m/Y" }}</td><td>{{ item.pedido.get_status_display }}</td><th scope="row">{{ item.produto.nome }}</th><td>{{ item.quantidade }}</td><td>R$ {{ item.subtotal|floatformat:"2g" }}</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% if historico.has_other_pages %}
+                        <nav class="seller-pagination" aria-label="Páginas do histórico">
+                            {% if historico.has_previous %}<a class="text-link" href="{% querystring pagina=historico.previous_page_number %}#historico-titulo">Anterior</a>{% endif %}
+                            <span>Página {{ historico.number }} de {{ historico.paginator.num_pages }}</span>
+                            {% if historico.has_next %}<a class="text-link" href="{% querystring pagina=historico.next_page_number %}#historico-titulo">Próxima</a>{% endif %}
+                        </nav>
+                    {% endif %}
+                {% else %}
+                    <p class="seller-note">Nenhuma venda no período.</p>
+                {% endif %}
+            </section>
+        {% endif %}
+    </section>
+{% endblock %}

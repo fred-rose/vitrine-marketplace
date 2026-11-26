@@ -1,0 +1,6 @@
+<form method="post" action="{% url 'loja:pagar_pedido' pedido.pk %}">
+    {% csrf_token %}
+    <button type="submit" class="button button--primary">
+        <svg class="icon" aria-hidden="true"><use href="#icon-cadeado"></use></svg> Pagar com Stripe (teste)
+    </button>
+</form>
