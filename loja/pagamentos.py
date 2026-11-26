@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -18,6 +19,7 @@ CHAVE_METADATA = "vitrine_pagamento_id"
 STATUS_RELEVANTES = (Pagamento.Status.PENDENTE, Pagamento.Status.PAGO)
 EVENTO_CONCLUIDO = "checkout.session.completed"
 EVENTO_EXPIRADO = "checkout.session.expired"
+logger = logging.getLogger(__name__)
 
 
 class PagamentoIndisponivel(Exception):
@@ -32,19 +34,66 @@ def total_centavos(pedido):
     return int(pedido.total.scaleb(2))
 
 
+def erro_segredo(valor, prefixo):
+    if not valor:
+        return "ausente"
+    if any(caractere.isspace() for caractere in valor):
+        return "contém espaço em branco interno"
+    if valor.startswith(("'", '"')) or valor.endswith(("'", '"')):
+        return "contém aspas literais nas bordas"
+    if prefixo == "sk_test_" and valor.startswith(("sk_live_", "rk_live_")):
+        return "chave live bloqueada"
+    if prefixo == "sk_test_" and valor.startswith("rk_test_"):
+        return "chave restrita rk_test_ não aceita pela configuração atual"
+    if not valor.startswith(prefixo):
+        return f"prefixo esperado: {prefixo}"
+    if valor == prefixo:
+        return "valor incompleto após o prefixo"
+    if valor in ("sk_test_substitua_pela_chave_do_sandbox", "whsec_substitua_pelo_segredo_do_endpoint"):
+        return "valor fictício do .env.example"
+    return None
+
+
+def erro_origem_stripe(origem):
+    if not origem:
+        return "ausente"
+    if any(caractere.isspace() for caractere in origem):
+        return "contém espaço em branco interno"
+    if origem.startswith(("'", '"')) or origem.endswith(("'", '"')):
+        return "contém aspas literais nas bordas"
+    try:
+        url = urlsplit(origem)
+    except ValueError:
+        return "URL malformada"
+    try:
+        if url.port == 0 or (url.port is None and url.netloc.endswith(":")):
+            return "porta inválida"
+    except ValueError:
+        return "porta inválida"
+    if not url.hostname:
+        return "hostname ausente"
+    if url.username is not None or url.password is not None:
+        return "contém credenciais na URL"
+    if url.path or "?" in origem or "#" in origem:
+        return "contém caminho, consulta ou fragmento"
+    if url.scheme not in {"http", "https"}:
+        return "esquema deve ser HTTPS ou HTTP de loopback"
+    if url.scheme == "http" and url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        return "HTTP só é permitido em loopback"
+    return None
+
+
 def configuracao_stripe():
     chave = settings.STRIPE_SECRET_KEY
     origem = settings.STRIPE_PUBLIC_ORIGIN.rstrip("/")
-    try:
-        url = urlsplit(origem)
-        porta_valida = url.port is None or url.port > 0
-    except ValueError:
-        porta_valida = False
-    if not (
-        chave.startswith("sk_test_") and settings.STRIPE_WEBHOOK_SECRET.startswith("whsec_")
-        and porta_valida and url.hostname and not (url.username or url.password or url.path or url.query or url.fragment)
-        and (url.scheme == "https" or (url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1", "::1"}))
-    ):
+    falhas = {
+        "STRIPE_SECRET_KEY": erro_segredo(chave, "sk_test_"),
+        "STRIPE_WEBHOOK_SECRET": erro_segredo(settings.STRIPE_WEBHOOK_SECRET, "whsec_"),
+        "STRIPE_PUBLIC_ORIGIN": erro_origem_stripe(origem),
+    }
+    motivos = [f"{nome}: {motivo}" for nome, motivo in falhas.items() if motivo]
+    if motivos:
+        logger.warning("Stripe sandbox bloqueado antes da API (%s).", "; ".join(motivos))
         raise PagamentoIndisponivel("O pagamento de teste está indisponível no momento.")
     return chave, origem
 
@@ -86,6 +135,25 @@ def sessao_corresponde(sessao, pagamento):
     )
 
 
+def criar_sessao_checkout(sessoes, parametros, chave):
+    opcoes = {"idempotency_key": chave}
+    try:
+        return sessoes.create(parametros, options=opcoes)
+    except stripe.IdempotencyError:
+        # A API pode ter registrado a requisição antiga sob a mesma chave.
+        anteriores = parametros.copy()
+        anteriores["payment_method_types"] = anteriores.pop("allowed_payment_method_types")
+        try:
+            return sessoes.create(anteriores, options=opcoes)
+        except stripe.InvalidRequestError as erro:
+            if not (
+                erro.http_status == 400 and erro.param == "payment_method_types"
+                and "no longer supported" in str(erro)
+            ):
+                raise
+        return sessoes.create(parametros, options={"idempotency_key": f"{chave}-endive"})
+
+
 def iniciar_checkout(pedido, comprador):
     if pedido.status != Pedido.Status.ABERTO:
         raise PagamentoIndisponivel("Este pedido não está aberto para pagamento.")
@@ -99,9 +167,9 @@ def iniciar_checkout(pedido, comprador):
         # A Stripe pode descartar chaves de idempotência após 24 horas.
         if timezone.now() - pagamento.criado_em >= timedelta(hours=23):
             raise PagamentoIndisponivel("A tentativa anterior precisa ser verificada antes de iniciar outra.")
-        resposta = sessoes.create({
+        resposta = criar_sessao_checkout(sessoes, {
             "mode": "payment",
-            "payment_method_types": ["card"],
+            "allowed_payment_method_types": ["card"],
             "adaptive_pricing": {"enabled": False},
             "client_reference_id": str(pedido.pk),
             "metadata": {CHAVE_METADATA: str(pagamento.pk)},
@@ -115,10 +183,11 @@ def iniciar_checkout(pedido, comprador):
             }],
             "success_url": origem + reverse("loja:pagamento_aprovado", args=[pedido.pk]),
             "cancel_url": origem + reverse("loja:pagamento_cancelado", args=[pedido.pk]),
-        }, options={"idempotency_key": f"vitrine-checkout-{pagamento.pk}"})
+        }, f"vitrine-checkout-{pagamento.pk}")
 
     sessao = resposta.to_dict()
     if not sessao_corresponde(sessao, pagamento):
+        logger.warning("Stripe Checkout: sessão retornada não corresponde ao pedido sandbox %s.", pedido.pk)
         raise PagamentoIndisponivel("Não foi possível validar a sessão de pagamento.")
 
     # O webhook pode confirmar ou expirar a sessão antes do retorno da chamada.
@@ -127,11 +196,13 @@ def iniciar_checkout(pedido, comprador):
         pk=pagamento.pk, status=Pagamento.Status.PENDENTE, pedido__status=Pedido.Status.ABERTO,
     ).update(sessao_stripe=sessao["id"])
     if not atualizados or sessao.get("status") != "open":
+        logger.warning("Stripe Checkout: sessão já encerrada ou pedido alterado (pedido %s).", pedido.pk)
         raise PagamentoIndisponivel("Esta sessão encerrou. Consulte o histórico para acompanhar a confirmação.")
 
     destino = sessao.get("url") or ""
     url = urlsplit(destino)
     if url.scheme != "https" or url.netloc != "checkout.stripe.com":
+        logger.warning("Stripe Checkout: endereço de redirecionamento fora do destino esperado (pedido %s).", pedido.pk)
         raise PagamentoIndisponivel("Não foi possível validar o endereço do Stripe Checkout.")
     return destino
 

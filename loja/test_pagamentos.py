@@ -107,6 +107,8 @@ class PagamentoTests(TestCase):
         self.assertEqual(dados["line_items"][0]["price_data"]["unit_amount"], 2470)
         self.assertEqual(dados["line_items"][0]["price_data"]["currency"], "brl")
         self.assertEqual(dados["adaptive_pricing"], {"enabled": False})
+        self.assertEqual(dados["allowed_payment_method_types"], ["card"])
+        self.assertNotIn("payment_method_types", dados)
         self.assertEqual(dados["success_url"], settings.STRIPE_PUBLIC_ORIGIN + self.aprovado)
         self.assertEqual(dados["cancel_url"], settings.STRIPE_PUBLIC_ORIGIN + self.cancelado)
         self.pedido.refresh_from_db()
@@ -130,6 +132,35 @@ class PagamentoTests(TestCase):
         self.mock_client.assert_not_called()
         self.assertFalse(Pagamento.objects.exists())
 
+    def test_diagnostico_informa_todas_as_falhas_sem_expor_valores(self):
+        chave = "sk_live_dado_ficticio"
+        segredo = '"whsec_dado_ficticio"'
+        origem = "https://usuario:dado_ficticio@example.org"
+        with self.settings(STRIPE_SECRET_KEY=chave, STRIPE_WEBHOOK_SECRET=segredo, STRIPE_PUBLIC_ORIGIN=origem):
+            with self.assertLogs("loja.pagamentos", level="WARNING") as logs:
+                self.assertRedirects(self.abrir(), self.historico)
+            with self.assertLogs("loja.pagamento_views", level="WARNING") as webhook:
+                self.assertEqual(self.client.post(self.webhook).status_code, 503)
+        saida = " ".join(logs.output + webhook.output)
+        self.assertIn("STRIPE_SECRET_KEY: chave live bloqueada", saida)
+        self.assertIn("STRIPE_WEBHOOK_SECRET: contém aspas literais", saida)
+        self.assertIn("STRIPE_PUBLIC_ORIGIN: contém credenciais na URL", saida)
+        self.assertNotIn("dado_ficticio", saida)
+        self.mock_client.assert_not_called()
+
+    def test_diagnostico_do_sdk_exclui_mensagem_original_da_api(self):
+        self.sessoes.create.side_effect = stripe.InvalidRequestError(
+            "detalhe_ficticio_sensivel", param="success_url", code="url_invalid", http_status=400,
+        )
+        with self.assertLogs("loja.pagamento_views", level="WARNING") as logs:
+            self.assertRedirects(self.abrir(), self.historico)
+        saida = " ".join(logs.output)
+        self.assertIn("InvalidRequestError", saida)
+        self.assertIn("HTTP=400", saida)
+        self.assertIn("código=url_invalid", saida)
+        self.assertIn("parâmetro=success_url", saida)
+        self.assertNotIn("detalhe_ficticio_sensivel", saida)
+
     def test_pagamento_repetido_reaproveita_sessao(self):
         primeira = self.abrir()
         dados = self.sessoes.create.call_args.args[0]
@@ -140,6 +171,55 @@ class PagamentoTests(TestCase):
         self.assertEqual(Pagamento.objects.count(), 1)
         self.sessoes.create.assert_called_once()
         self.sessoes.retrieve.assert_called_once_with(sessao["id"])
+
+    def test_conflito_com_rejeicao_legada_reutiliza_a_tentativa_com_chave_estavel(self):
+        pagamento = self.pedido.pagamentos.create(valor_centavos=2470)
+        chave = f"vitrine-checkout-{pagamento.pk}"
+
+        def criar(dados, options):
+            if options["idempotency_key"] == f"{chave}-endive":
+                return self.criar_sessao(dados, options)
+            if "payment_method_types" in dados:
+                raise stripe.InvalidRequestError(
+                    "The payment_method_types parameter is no longer supported.",
+                    param="payment_method_types", http_status=400,
+                )
+            raise stripe.IdempotencyError("Parâmetros diferentes")
+
+        self.sessoes.create.side_effect = criar
+        self.assertTrue(self.abrir().url.startswith("https://checkout.stripe.com/"))
+        primeira, legada, atualizada = self.sessoes.create.call_args_list
+        self.assertEqual(primeira.kwargs["options"], {"idempotency_key": chave})
+        self.assertEqual(legada.kwargs["options"], primeira.kwargs["options"])
+        self.assertEqual(legada.args[0]["payment_method_types"], ["card"])
+        self.assertEqual(atualizada.kwargs["options"], {"idempotency_key": f"{chave}-endive"})
+        self.assertEqual(atualizada.args[0], primeira.args[0])
+        self.assertEqual(Pagamento.objects.count(), 1)
+        pagamento.refresh_from_db()
+        self.assertTrue(pagamento.sessao_stripe.startswith("cs_test_"))
+
+    def test_conflito_reaproveita_sessao_legada_quando_ela_existe(self):
+        def criar(dados, options):
+            if "payment_method_types" in dados:
+                return self.criar_sessao(dados, options)
+            raise stripe.IdempotencyError("Parâmetros diferentes")
+
+        self.sessoes.create.side_effect = criar
+        self.assertTrue(self.abrir().url.startswith("https://checkout.stripe.com/"))
+        primeira, legada = self.sessoes.create.call_args_list
+        self.assertEqual(primeira.kwargs["options"], legada.kwargs["options"])
+        self.assertEqual(Pagamento.objects.count(), 1)
+
+    def test_conflito_sem_prova_da_rejeicao_nao_tenta_criar_com_outra_chave(self):
+        self.sessoes.create.side_effect = [
+            stripe.IdempotencyError("Parâmetros diferentes"),
+            stripe.InvalidRequestError("Erro de configuração", param="success_url", http_status=400),
+        ]
+        with self.assertLogs("loja.pagamento_views", level="WARNING"):
+            self.assertRedirects(self.abrir(), self.historico)
+        primeira, legada = self.sessoes.create.call_args_list
+        self.assertEqual(primeira.kwargs["options"], legada.kwargs["options"])
+        self.assertIsNone(Pagamento.objects.get().sessao_stripe)
 
     def test_rede_inconclusiva_reaproveita_chave_de_idempotencia(self):
         self.sessoes.create.side_effect = stripe.APIConnectionError("timeout")

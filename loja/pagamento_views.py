@@ -15,7 +15,7 @@ from django.views.decorators.http import require_POST, require_safe
 
 from .checkout import CheckoutInvalido, cancelar_pedido, limite_reserva
 from .models import Avaliacao, ItemPedido, Pagamento, Pedido
-from .pagamentos import EventoInvalido, PagamentoIndisponivel, iniciar_checkout, processar_evento
+from .pagamentos import EventoInvalido, PagamentoIndisponivel, erro_segredo, iniciar_checkout, processar_evento
 
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,25 @@ def pagar_pedido(request, pedido_id):
         url = iniciar_checkout(pedido, request.user)
     except PagamentoIndisponivel as erro:
         messages.error(request, str(erro))
-    except (stripe.StripeError, DatabaseError) as erro:
+    except stripe.StripeError as erro:
+        status = erro.http_status if type(erro.http_status) is int else "sem resposta"
+        codigo = erro.code if erro.code in {
+            "api_key_expired", "resource_missing", "parameter_unknown", "parameter_missing",
+            "parameter_invalid_empty", "parameter_invalid_string", "url_invalid", "idempotency_key_in_use",
+        } else "não informado"
+        parametro = getattr(erro, "param", None)
+        if parametro not in (
+            "adaptive_pricing", "adaptive_pricing[enabled]", "success_url", "cancel_url",
+            "mode", "line_items", "line_items[0][price_data][unit_amount]", "payment_method_types",
+            "allowed_payment_method_types",
+        ):
+            parametro = "não informado"
+        logger.warning(
+            "Stripe Checkout sandbox: pedido=%s, SDK=%s, API=%s, erro=%s, HTTP=%s, código=%s, parâmetro=%s.",
+            pedido.pk, stripe.VERSION, stripe.api_version, type(erro).__name__, status, codigo, parametro,
+        )
+        messages.error(request, "Não foi possível abrir o pagamento. Tente novamente em instantes.")
+    except DatabaseError as erro:
         logger.warning("Falha ao abrir o Stripe Checkout para o pedido %s (%s).", pedido.pk, type(erro).__name__)
         messages.error(request, "Não foi possível abrir o pagamento. Tente novamente em instantes.")
     except Pedido.DoesNotExist:
@@ -91,12 +109,21 @@ def retorno_pagamento(request, pedido_id, cancelado=False):
 @require_POST
 def webhook_stripe(request):
     segredo = settings.STRIPE_WEBHOOK_SECRET
-    if not segredo.startswith("whsec_"):
+    falha = erro_segredo(segredo, "whsec_")
+    if falha:
+        logger.warning("Webhook Stripe bloqueado antes da assinatura (STRIPE_WEBHOOK_SECRET: %s).", falha)
         return HttpResponse(status=503)
     try:
         evento = stripe.Webhook.construct_event(request.body, request.headers.get("Stripe-Signature", ""), segredo)
         processar_evento(evento.to_dict())
-    except (ValueError, KeyError, TypeError, AttributeError, stripe.SignatureVerificationError, EventoInvalido):
+    except stripe.SignatureVerificationError:
+        logger.warning("Webhook Stripe rejeitado: assinatura ausente ou inválida.")
+        return HttpResponse(status=400)
+    except EventoInvalido:
+        logger.warning("Webhook Stripe rejeitado: evento incompatível com a sessão ou pedido sandbox.")
+        return HttpResponse(status=400)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        logger.warning("Webhook Stripe rejeitado: formato do evento inválido.")
         return HttpResponse(status=400)
     except DatabaseError as erro:
         logger.warning("Falha ao processar webhook Stripe (%s).", type(erro).__name__)

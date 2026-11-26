@@ -243,7 +243,9 @@ A senha é digitada sem eco, pede confirmação e passa pelos validadores do Dja
 
 ### Stripe em sandbox
 
-A validação local usou sessões mockadas e webhooks assinados localmente, verificados pelo SDK oficial. A validação de ponta a ponta com a Stripe está pendente.
+A homologação de ponta a ponta foi concluída em 26/11/2026 no Stripe Sandbox. O pedido **#6**, de **R$ 49,90**, foi confirmado em `PAGO`. A sessão no Stripe estava `complete` e `paid`, e o evento `checkout.session.completed` conferia com o webhook processado pelo Django. O produto permaneceu com **6 unidades em estoque** após o pagamento, sem segunda baixa. As suítes automatizadas continuam usando mocks e assinaturas locais.
+
+![Confirmação do pagamento de teste do pedido 6](docs/screenshots/pagamento-aprovado.png)
 
 1. Defina `STRIPE_SECRET_KEY` com uma chave `sk_test_…` do sandbox e `STRIPE_PUBLIC_ORIGIN` com o endereço usado para acessar a Vitrine.
 2. Autentique a Stripe CLI no mesmo sandbox e encaminhe os eventos ao servidor local. Exporte o segredo informado pela CLI em `STRIPE_WEBHOOK_SECRET` e reinicie o Django com as variáveis carregadas. [Referência da Stripe CLI](https://docs.stripe.com/cli)
@@ -294,12 +296,14 @@ O Blueprint deixa o banco sem acesso público e não cria um agendador. A tarefa
 | Retentativas de rede e webhooks repetidos podem duplicar efeitos. | Cada tentativa tem chave de idempotência. Restrições no banco e transições atômicas protegem sessão e confirmação. |
 | A baixa ocorria antes do pagamento e pedidos abandonados podiam prender estoque. | A reserva identifica quais unidades devem ser devolvidas. O cancelamento é atômico e a expiração respeita tentativas Stripe inconclusivas. |
 | O primeiro ambiente de instalação não encontrou uma distribuição do SDK Stripe. | O SDK foi instalado após nova tentativa com acesso autorizado, fixado nas dependências e exercitado localmente com mocks. |
+| O Stripe CLI estava autorizado, mas o Django não recebia a configuração do webhook. | Foram adicionados diagnósticos por variável, sem registrar valores, e a configuração foi carregada no processo do Django. |
+| A API `2026-11-18.endive` rejeitava `payment_method_types`, e a chave de idempotência original mantinha a requisição rejeitada. | O Checkout usa `allowed_payment_method_types=["card"]`. Só passa a uma nova chave estável após confirmar na Stripe a rejeição da requisição anterior. |
 
 Entre os desafios extras estão o catálogo com filtros sem JavaScript, as 16 imagens locais, o seed idempotente, a avaliação vinculada à compra, as permissões por vendedor e os gráficos do painel sem biblioteca externa.
 
 ## Testes automatizados
 
-A execução de documentação foi realizada com Python 3.14.5 e Node.js 24.15.0. A suíte passou com **72 testes Django e 7 JavaScript**. Além disso, o check do Django e as verificações de migrações passaram. Para rodar os testes JavaScript é preciso ter Node.js disponível.
+Na homologação, passaram **77 testes Django e 7 JavaScript**. A captura da suíte na galeria registra a execução anterior, com 72 testes Django. Para rodar os testes JavaScript é preciso ter Node.js disponível.
 
 ```bash
 python manage.py test
@@ -360,7 +364,7 @@ Capturas do Edge em uma instância local isolada, preenchida com dados de demons
 
 ## Limitações e próximos passos
 
-- Validar o checkout com credenciais reais de sandbox e entrega de um webhook pela infraestrutura da Stripe. O projeto usa apenas cartão em BRL no modo de teste.
+- A homologação Stripe cobre cartão em BRL no sandbox. O fluxo de produção ainda não foi validado.
 - Configurar a execução periódica de `expirar_pedidos` e definir um procedimento de reconciliação para tentativas que permaneçam inconclusivas.
 - Antes de uma implantação, avaliar um banco de produção, configurar o serviço de arquivos estáticos, HTTPS, monitoramento e gestão de segredos.
 - Fluxos de reembolso, frete e repasse financeiro entre vendedores ficam para uma etapa futura.

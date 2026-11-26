@@ -168,9 +168,9 @@ if not DEBUG:
 LOGIN_URL = "/api-auth/login/"
 LOGIN_REDIRECT_URL = "/"
 
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
-STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-STRIPE_PUBLIC_ORIGIN = os.environ.get("STRIPE_PUBLIC_ORIGIN", "")
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "").strip()
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+STRIPE_PUBLIC_ORIGIN = os.environ.get("STRIPE_PUBLIC_ORIGIN", "").strip()
 
 
 # Email
